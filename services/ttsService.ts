@@ -1,20 +1,22 @@
 export async function getSpeechAudioBuffer(text: string, audioContext: AudioContext): Promise<AudioBuffer | null> {
   try {
-    // نطلب الصوت من Coqui API
-    const response = await fetch("https://app.coqui.ai/api/v2/speak", {
+    // نطلب الصوت من Coqui TTS (رابط جديد فعّال)
+    const response = await fetch("https://app.coqui.ai/api/v2/tts/speak", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${process.env.NEXT_PUBLIC_COQUI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        text, // النص اللي هيتحول لصوت
-        voice: "coqui-tts/en_us/ryan", // صوت افتراضي (تقدر تغيّره لاحقًا)
+        text, // النص الذي سيتم تحويله لصوت
+        voice_id: "4f1dff3b-9f9c-4d9d-9bfb-079d2b3cfb6a", // صوت افتراضي (تقدر تغيّره لاحقًا)
+        output_format: "mp3", // نطلب ملف بصيغة mp3
       }),
     });
 
     if (!response.ok) {
-      console.error("Coqui API Error:", await response.text());
+      const errorText = await response.text();
+      console.error("Coqui API Error:", errorText);
       throw new Error("Audio generation failed");
     }
 
