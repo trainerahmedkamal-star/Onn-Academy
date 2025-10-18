@@ -2,17 +2,16 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { dailyWordsData } from '../../data/words';
 import type { Word } from '../../types';
 import Button from '../Button';
-import { getSpeechAudioBuffer } from '../../services/ttsService';
 import { useAuth } from '../../contexts/AuthContext';
 
-// Speaker Icon Component for reusability and clean look
-const SpeakerIcon = ({ onClick, isLoading }: { onClick: () => void, isLoading: boolean }) => {
-  if (isLoading) {
+// Speaker Icon Component updated for a "speaking" state
+const SpeakerIcon = ({ onClick, isSpeaking }: { onClick: () => void, isSpeaking: boolean }) => {
+  if (isSpeaking) {
     return (
       <div className="h-6 w-6 flex items-center justify-center">
-        <svg className="animate-spin h-5 w-5 text-sky-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        {/* Using a simple pulse animation to indicate speaking */}
+        <svg className="animate-pulse h-6 w-6 text-sky-500" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 3.5c-4.69 0-8.5 3.81-8.5 8.5s3.81 8.5 8.5 8.5 8.5-3.81 8.5-8.5-3.81-8.5-8.5-8.5zM12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2z"></path><path d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>
         </svg>
       </div>
     );
@@ -23,7 +22,7 @@ const SpeakerIcon = ({ onClick, isLoading }: { onClick: () => void, isLoading: b
       className="text-sky-500 hover:text-sky-700 transition-colors focus:outline-none"
       aria-label="Listen to pronunciation"
       title="Listen"
-      disabled={isLoading}
+      disabled={isSpeaking}
     >
       <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
@@ -35,8 +34,8 @@ const SpeakerIcon = ({ onClick, isLoading }: { onClick: () => void, isLoading: b
 const WordCard: React.FC<{
   word: Word;
   speak: (text: string) => void;
-  loadingAudio: string | null;
-}> = React.memo(({ word, speak, loadingAudio }) => {
+  speakingText: string | null;
+}> = React.memo(({ word, speak, speakingText }) => {
   return (
     <div className="bg-white p-6 rounded-xl shadow-lg transition-transform transform hover:-translate-y-1">
       <div className="flex justify-between items-center mb-4">
@@ -45,7 +44,7 @@ const WordCard: React.FC<{
             <h3 className="text-2xl font-bold text-slate-800" lang="en">{word.word}</h3>
             <p className="text-lg text-sky-600 font-semibold">{word.translation}</p>
           </div>
-          <SpeakerIcon onClick={() => speak(word.word)} isLoading={loadingAudio === word.word} />
+          <SpeakerIcon onClick={() => speak(word.word)} isSpeaking={speakingText === word.word} />
         </div>
       </div>
       <div className="pt-4 border-t border-slate-200">
@@ -54,7 +53,7 @@ const WordCard: React.FC<{
             <li key={index} className="flex items-center gap-3">
                <span className="text-sky-500 text-lg">•</span>
                <span className="flex-1">{example}</span>
-               <SpeakerIcon onClick={() => speak(example)} isLoading={loadingAudio === example} />
+               <SpeakerIcon onClick={() => speak(example)} isSpeaking={speakingText === example} />
             </li>
           ))}
         </ul>
@@ -67,9 +66,8 @@ const DailyWords: React.FC = () => {
   const { user } = useAuth();
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
   const [completedDays, setCompletedDays] = useState<Set<number>>(new Set());
-  const [loadingAudio, setLoadingAudio] = useState<string | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const [speakingText, setSpeakingText] = useState<string | null>(null);
+  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   
   const storageKey = user ? `completedDays_${user.email}` : 'completedDays_guest';
 
@@ -91,53 +89,69 @@ const DailyWords: React.FC = () => {
       console.error("Failed to save completed days to localStorage", error);
     }
   }, [completedDays, storageKey]);
+  
+  useEffect(() => {
+    const loadAndSetVoice = () => {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length === 0) return;
 
-  const speak = useCallback(async (text: string) => {
-    if (loadingAudio) return;
+        let bestVoice: SpeechSynthesisVoice | undefined;
+        
+        // Find a high-quality voice, preferring specific ones known for quality.
+        const preferredVoices = ['Google US English', 'Microsoft Zira - English (United States)', 'Alex'];
+        for (const name of preferredVoices) {
+            bestVoice = voices.find(voice => voice.name === name && voice.lang.startsWith('en'));
+            if (bestVoice) break;
+        }
+
+        // Fallback to the default US English voice or any US English voice.
+        if (!bestVoice) bestVoice = voices.find(voice => voice.lang === 'en-US' && voice.default);
+        if (!bestVoice) bestVoice = voices.find(voice => voice.lang === 'en-US');
+        if (!bestVoice) bestVoice = voices.find(voice => voice.lang.startsWith('en'));
+
+        selectedVoiceRef.current = bestVoice || null;
+    };
+
+    window.speechSynthesis.onvoiceschanged = loadAndSetVoice;
+    loadAndSetVoice();
+
+    return () => {
+        window.speechSynthesis.onvoiceschanged = null;
+        if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.cancel();
+        }
+    };
+  }, []);
+
+  const speak = useCallback((text: string) => {
+    if (speakingText === text || !text) return;
     
-    if (activeSourceRef.current) {
-      activeSourceRef.current.stop();
-      activeSourceRef.current = null;
-    }
-
-    if (!audioContextRef.current) {
-      try {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      } catch (e) {
-        console.error("Web Audio API is not supported in this browser.", e);
-        alert("Sorry, your browser does not support the audio playback feature.");
-        return;
-      }
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
     }
     
-    if (audioContextRef.current.state === 'suspended') {
-      await audioContextRef.current.resume();
-    }
+    setTimeout(() => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        
+        if (selectedVoiceRef.current) {
+            utterance.voice = selectedVoiceRef.current;
+        }
+        
+        utterance.lang = 'en-US';
+        utterance.rate = 0.95; // Slightly slower for clarity
+        utterance.pitch = 1.0;
 
-    setLoadingAudio(text);
-    try {
-      const audioBuffer = await getSpeechAudioBuffer(text, audioContextRef.current);
-      if (audioBuffer && audioContextRef.current) {
-        const source = audioContextRef.current.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioContextRef.current.destination);
-        source.start();
-        activeSourceRef.current = source;
-        source.onended = () => {
-          if (activeSourceRef.current === source) {
-            activeSourceRef.current = null;
-          }
+        utterance.onstart = () => setSpeakingText(text);
+        utterance.onend = () => setSpeakingText(null);
+        utterance.onerror = (e) => {
+            console.error('Speech synthesis error:', e);
+            setSpeakingText(null);
         };
-      } else {
-        alert("Sorry, there was an issue generating the audio.");
-      }
-    } catch (error) {
-      console.error("Error in speak function:", error);
-      alert("An error occurred while trying to play audio.");
-    } finally {
-      setLoadingAudio(null);
-    }
-  }, [loadingAudio]);
+        
+        window.speechSynthesis.speak(utterance);
+    }, 50);
+
+  }, [speakingText]);
 
   const currentSet = dailyWordsData[currentDayIndex];
   const totalDays = dailyWordsData.length;
@@ -184,7 +198,7 @@ const DailyWords: React.FC = () => {
         </h3>
         <div className="space-y-6">
           {currentSet.words.map((word) => (
-            <WordCard key={word.word} word={word} speak={speak} loadingAudio={loadingAudio} />
+            <WordCard key={word.word} word={word} speak={speak} speakingText={speakingText} />
           ))}
         </div>
         

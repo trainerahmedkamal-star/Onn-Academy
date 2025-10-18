@@ -15,13 +15,14 @@ const buildHistory = (messages: Message[]): Content[] => {
 };
 
 export const getGeminiResponse = async (history: Message[]): Promise<string> => {
-    // The API key must be obtained exclusively from the environment variable `process.env.API_KEY`.
-    if (!process.env.API_KEY) {
+    // FIX: Use process.env.API_KEY as per the guidelines to fix TypeScript error and align with requirements.
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
         console.error("API_KEY environment variable not set");
         return "I'm sorry, the API key is not configured. Please contact the administrator.";
     }
 
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey });
     
     // We send the whole conversation history each time.
     const conversationHistory = buildHistory(history);
