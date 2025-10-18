@@ -1,6 +1,6 @@
-
 import React from 'react';
 import Button from '../Button';
+import KemetTheIbis from '../KemetTheIbis';
 
 interface HomeProps {
   onStart: () => void;
@@ -8,17 +8,27 @@ interface HomeProps {
 
 const Home: React.FC<HomeProps> = ({ onStart }) => {
   return (
-    <div className="flex flex-col items-center justify-center h-[calc(100vh-64px)] bg-white">
-      <div className="text-center p-8">
-        <h1 className="text-5xl md:text-7xl font-bold text-slate-800 mb-4 animate-fade-in-down">
-          مرحباً بك في <span className="text-sky-500">O'n English Practice</span>
-        </h1>
-        <p className="text-lg md:text-xl text-slate-600 mb-8 max-w-2xl mx-auto animate-fade-in-up">
-          طريقك الممتع والتفاعلي لتعلم أهم 1000 كلمة في اللغة الإنجليزية واستخدامها في حياتك اليومية.
-        </p>
-        <Button onClick={onStart} className="animate-bounce">
-          ابدأ الآن
-        </Button>
+    <div className="bg-white">
+      <div className="container mx-auto min-h-[calc(100vh-64px)] px-6 py-12 flex flex-col lg:flex-row items-center justify-center">
+        {/* Text Content Column */}
+        <div className="lg:w-1/2 text-center lg:text-right mb-12 lg:mb-0">
+          <h1 className="text-4xl md:text-6xl font-extrabold text-slate-800 mb-6 leading-tight animate-fade-in-down">
+            أتقِن أهم 1000 كلمة وتحدث الإنجليزية <span className="text-sky-500">بثقة.</span>
+          </h1>
+          <p className="text-lg md:text-xl text-slate-600 mb-10 max-w-lg mx-auto lg:mx-0 animate-fade-in-up delay-200">
+            انضم لآلاف المتعلمين وابدأ رحلتك نحو الطلاقة بخمس كلمات جديدة كل يوم. التعلم أصبح أسهل وأكثر متعة من أي وقت مضى.
+          </p>
+          <div className="animate-fade-in-up delay-400">
+            <Button onClick={onStart} className="animate-pulse">
+              ابدأ التعلم مجاناً
+            </Button>
+          </div>
+        </div>
+
+        {/* Mascot Column */}
+        <div className="lg:w-1/2 flex justify-center lg:justify-start animate-fade-in-left">
+           <KemetTheIbis className="w-64 h-64 md:w-96 md:h-96" />
+        </div>
       </div>
     </div>
   );
