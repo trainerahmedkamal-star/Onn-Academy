@@ -19,7 +19,7 @@ export async function GET(request) {
     return new Response(arrayBuffer, {
       headers: {
         "Content-Type": "audio/mpeg",
-        "Access-Control-Allow-Origin": "*", // مهم جدًا عشان يمنع خطأ CORS
+        "Access-Control-Allow-Origin": "*", // يسمح بالتشغيل من أي موقع
       },
     });
   } catch (error) {
@@ -29,4 +29,3 @@ export async function GET(request) {
     });
   }
 }
-
