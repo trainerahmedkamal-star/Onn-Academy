@@ -1,19 +1,79 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { Message } from '../../types';
 import Button from '../Button';
 import { getGeminiResponse } from '../../services/geminiService';
+import { dailyWordsData } from '../../data/words';
+import { speechService } from '../../services/ttsService';
+
+const SpeakerIcon = ({ onClick, isSpeaking }: { onClick: () => void, isSpeaking: boolean }) => {
+  if (isSpeaking) {
+    return (
+      <div className="h-6 w-6 flex items-center justify-center cursor-pointer text-sky-500" onClick={onClick} title="إيقاف">
+         <svg className="h-5 w-5 animate-pulse" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/>
+        </svg>
+      </div>
+    );
+  }
+  return (
+    <button
+      onClick={onClick}
+      className={'text-slate-400 hover:text-sky-500 transition-colors focus:outline-none'}
+      aria-label="الاستماع للنطق"
+      title={'استمع'}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+      </svg>
+    </button>
+  );
+};
+
 
 const ConversationPractice: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
-    { id: 1, text: 'Hello! I am your virtual tutor. Ask me anything to practice your English.', sender: 'bot' },
+    { id: 1, text: "Hello! Let's practice with the words you learned. How are you today?", sender: 'bot' },
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [speakingText, setSpeakingText] = useState<string | null>(null);
+  
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const learnedWords = dailyWordsData.flatMap(daySet => daySet.words.map(word => word.word.toLowerCase()));
+
+  const speak = useCallback((text: string) => {
+    if (speechService.isSpeaking() && speakingText === text) {
+      speechService.stop();
+    } else {
+      speechService.speak(
+        text,
+        () => setSpeakingText(text), // onStart
+        () => setSpeakingText(null)  // onEnd
+      );
+    }
+  }, [speakingText]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Auto-speak the first message
+  useEffect(() => {
+    if (speechService.isConfigured()) {
+        const timer = setTimeout(() => speak(messages[0].text), 100);
+        return () => clearTimeout(timer);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Cleanup audio on component unmount
+  useEffect(() => {
+    return () => {
+      speechService.stop();
+    };
+  }, []);
+  
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,7 +90,7 @@ const ConversationPractice: React.FC = () => {
     setInputValue('');
     setIsTyping(true);
 
-    const botResponseText = await getGeminiResponse(newMessages);
+    const botResponseText = await getGeminiResponse(newMessages, learnedWords);
 
     const botMessage: Message = {
       id: Date.now() + 1,
@@ -40,19 +100,25 @@ const ConversationPractice: React.FC = () => {
     
     setMessages(prev => [...prev, botMessage]);
     setIsTyping(false);
+    speak(botResponseText); // Auto-play the bot's response
   };
 
   return (
     <div className="max-w-3xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
       <div className="text-center mb-12">
         <h2 className="text-4xl font-extrabold text-slate-800">ممارسة المحادثة</h2>
-        <p className="mt-4 text-xl text-slate-600">تحدث مع المدرس الافتراضي لتحسين مهاراتك.</p>
+        <p className="mt-4 text-xl text-slate-600">تحدث مع المدرس الافتراضي وتدرب على الكلمات التي تعلمتها.</p>
       </div>
 
       <div className="bg-white rounded-2xl shadow-2xl h-[60vh] flex flex-col">
         <div className="flex-1 p-6 overflow-y-auto">
           {messages.map((msg) => (
-            <div key={msg.id} className={`flex mb-4 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={msg.id} className={`flex items-end mb-4 gap-2 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+              
+              {msg.sender === 'bot' && (
+                <SpeakerIcon onClick={() => speak(msg.text)} isSpeaking={speakingText === msg.text} />
+              )}
+
               <div
                 className={`max-w-xs md:max-w-md p-3 rounded-2xl ${
                   msg.sender === 'user'

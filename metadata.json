@@ -1,5 +1,7 @@
 {
   "name": "O'n English Practice",
   "description": "An interactive web application designed to help users learn and practice the 1000 most common English words for daily use, featuring daily words, conversation practice, and learning videos.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }
