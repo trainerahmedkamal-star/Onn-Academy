@@ -1,88 +1,199 @@
-import { GoogleGenAI, Type } from "@google/genai";
 
 export interface PronunciationAssessment {
   score: number; // A score from 0 to 1
   message: string;
 }
 
-/**
- * Converts a Blob to a base64 encoded string.
- * @param blob The blob to convert.
- * @returns A promise that resolves to the base64 string.
- */
-const blobToBase64 = (blob: Blob): Promise<string> => {
+// Helper to calculate Levenshtein distance (similarity between two strings)
+const levenshteinDistance = (a: string, b: string): number => {
+  const matrix = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          Math.min(
+            matrix[i][j - 1] + 1, // insertion
+            matrix[i - 1][j] + 1 // deletion
+          )
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+};
+
+const calculateSimilarity = (target: string, input: string): number => {
+    const longer = target.length > input.length ? target : input;
+    if (longer.length === 0) {
+      return 1.0;
+    }
+    const distance = levenshteinDistance(target.toLowerCase(), input.toLowerCase());
+    return (longer.length - distance) / longer.length;
+};
+
+// --- Hugging Face Whisper Integration ---
+
+const recordAudio = (durationMs: number): Promise<Blob> => {
     return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const base64data = reader.result as string;
-            // remove "data:audio/webm;base64," prefix
-            resolve(base64data.split(',')[1]);
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(stream => {
+                const mediaRecorder = new MediaRecorder(stream);
+                const audioChunks: BlobPart[] = [];
+
+                mediaRecorder.addEventListener("dataavailable", (event) => {
+                    audioChunks.push(event.data);
+                });
+
+                mediaRecorder.addEventListener("stop", () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' }); // wav is safer for APIs
+                    resolve(audioBlob);
+                    // Stop all tracks to release mic
+                    stream.getTracks().forEach(track => track.stop());
+                });
+
+                mediaRecorder.start();
+
+                setTimeout(() => {
+                    if (mediaRecorder.state === "recording") {
+                        mediaRecorder.stop();
+                    }
+                }, durationMs);
+            })
+            .catch(err => reject(err));
+    });
+};
+
+const transcribeWithWhisper = async (audioBlob: Blob, token: string): Promise<string> => {
+    const response = await fetch(
+        "https://api-inference.huggingface.co/models/openai/whisper-base",
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/octet-stream",
+            },
+            method: "POST",
+            body: audioBlob,
+        }
+    );
+
+    if (!response.ok) {
+        throw new Error(`HF API Error: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    // Whisper usually returns { text: "transcription..." }
+    return result.text || "";
+};
+
+// --- Fallback: Web Speech API ---
+
+const recognizeWithWebSpeech = (lang: string = 'en-US'): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            reject("Browser does not support Speech Recognition");
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.lang = lang;
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.onresult = (event: any) => {
+            resolve(event.results[0][0].transcript);
         };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
+
+        recognition.onerror = (event: any) => {
+            reject(event.error);
+        };
+
+        recognition.onend = () => {
+           // If it ends without result, we might handle it outside
+        };
+
+        try {
+            recognition.start();
+        } catch (e) {
+            reject(e);
+        }
     });
 };
 
 
 /**
- * Calls the Gemini API to assess pronunciation.
- * @param audioBlob The recorded audio of the user speaking.
- * @param targetText The text the user was supposed to say.
- * @returns A promise that resolves to a pronunciation assessment.
+ * Evaluates speech using Hugging Face Whisper (if token present) or Web Speech API (fallback).
  */
-export const assessPronunciation = async (audioBlob: Blob, targetText: string): Promise<PronunciationAssessment> => {
-  // FIX: Use real Gemini API for pronunciation assessment instead of a mock service.
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    console.error("API_KEY environment variable not set");
-    return { score: 0, message: "API key is not configured." };
-  }
-  const ai = new GoogleGenAI({ apiKey });
-
-  try {
-    const audioData = await blobToBase64(audioBlob);
+export const evaluateSpeech = async (targetText: string): Promise<PronunciationAssessment> => {
+    const hfToken = process.env.HUGGING_FACE_TOKEN;
     
-    const audioPart = {
-        inlineData: {
-            mimeType: audioBlob.type,
-            data: audioData
+    let transcript = "";
+    let methodUsed = "";
+
+    try {
+        if (hfToken) {
+            // Use Whisper
+            console.log("Using Whisper (Hugging Face)...");
+            methodUsed = "Whisper AI";
+            // Record for 3 seconds (good enough for single words/short phrases)
+            const audioBlob = await recordAudio(3000);
+            transcript = await transcribeWithWhisper(audioBlob, hfToken);
+        } else {
+            // Use Web Speech API Fallback
+            console.log("Using Web Speech API (Fallback)...");
+            methodUsed = "Browser Speech";
+            transcript = await recognizeWithWebSpeech();
         }
-    };
-
-    const prompt = `Please act as an English pronunciation coach. The user, an Arabic speaker, was trying to say the following text: "${targetText}". Listen to the user's recording and assess their pronunciation. Provide a score between 0.0 and 1.0, where 1.0 is a perfect native-like pronunciation. Also, provide a short, encouraging, and constructive feedback message in Arabic. Your response must be a JSON object with two keys: "score" (a number) and "message" (a string).`;
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-pro',
-        contents: [{ parts: [audioPart, { text: prompt }] }],
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    score: { type: Type.NUMBER, description: "Pronunciation score from 0.0 to 1.0" },
-                    message: { type: Type.STRING, description: "Feedback message in Arabic" }
-                },
-                required: ['score', 'message']
+    } catch (error) {
+        console.warn("Primary speech recognition failed, trying fallback or exiting.", error);
+        
+        // If Whisper failed (e.g., API limit), try Web Speech API immediately as backup
+        if (methodUsed === "Whisper AI") {
+            try {
+                transcript = await recognizeWithWebSpeech();
+            } catch (e) {
+                return { score: 0, message: "تعذر الوصول للميكروفون أو الخدمة." };
             }
+        } else {
+            return { score: 0, message: "حدث خطأ في التعرف على الصوت." };
         }
-    });
-    
-    const jsonString = response.text.trim();
-    const result = JSON.parse(jsonString);
-
-    if (typeof result.score === 'number' && typeof result.message === 'string') {
-        // Add the score to the message for clarity
-        result.message = `${result.message} (التقييم: ${Math.round(result.score * 100)}%)`;
-        return result;
-    } else {
-        throw new Error("Invalid JSON response from API");
     }
 
-  } catch (error) {
-    console.error("Error assessing pronunciation with Gemini API:", error);
+    console.log("User said:", transcript);
+
+    // Clean up text for comparison (remove punctuation)
+    const cleanTarget = targetText.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g,"");
+    const cleanTranscript = transcript.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g,"");
+
+    const similarity = calculateSimilarity(cleanTarget, cleanTranscript);
+    
+    // Generate feedback based on similarity score
+    let message = "";
+    if (similarity >= 0.9) { // High threshold for Whisper
+            message = "ممتاز! نطق سليم 100% 🌟";
+    } else if (similarity > 0.7) {
+            message = `رائع! لقد قلت "${cleanTranscript}" وهي قريبة جداً.`;
+    } else if (similarity > 0.4) {
+            message = `جيد، لكنك قلت "${cleanTranscript}". حاول مرة أخرى!`;
+    } else {
+            message = `سمعت "${cleanTranscript}". حاول بوضوح أكثر.`;
+    }
+
     return {
-      score: 0,
-      message: "حدث خطأ أثناء تقييم النطق. الرجاء المحاولة مرة أخرى."
+        score: similarity,
+        message: message
     };
-  }
 };

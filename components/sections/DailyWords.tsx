@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { dailyWordsData } from '../../data/words';
 import type { Word } from '../../types';
 import Button from '../Button';
 import { useAuth } from '../../contexts/AuthContext';
 import { speechService } from '../../services/ttsService';
-import { assessPronunciation } from '../../services/pronunciationService';
+import { evaluateSpeech, PronunciationAssessment } from '../../services/pronunciationService';
 
 
 const SpeakerIcon = ({ onClick, isSpeaking, isLoading }: { onClick: () => void, isSpeaking: boolean, isLoading: boolean }) => {
@@ -58,7 +57,7 @@ const MicIcon = ({ onClick, isRecording }: { onClick: () => void, isRecording: b
       onClick={onClick}
       className={`h-10 w-10 flex items-center justify-center rounded-full transition-colors focus:outline-none ${isRecording ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-slate-50 text-slate-400 hover:bg-sky-50 hover:text-sky-600'}`}
       aria-label={isRecording ? 'إيقاف التسجيل' : 'تدرب على النطق'}
-      title={isRecording ? 'إيقاف التسجيل' : 'تدرب على النطق'}
+      title={isRecording ? 'جاري الاستماع...' : 'تدرب على النطق'}
     >
       <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
         {isRecording 
@@ -160,9 +159,6 @@ const DailyWords: React.FC = () => {
   const [recordingForWord, setRecordingForWord] = useState<string | null>(null);
   const [feedbacks, setFeedbacks] = useState<Record<string, PronunciationFeedback>>({});
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-
   const storageKey = user ? `completedDays_${user.email}` : 'completedDays_guest';
   
   // Load progress
@@ -184,13 +180,10 @@ const DailyWords: React.FC = () => {
     }
   }, [completedDays, storageKey]);
   
-  // Cleanup audio/mic on component unmount
+  // Cleanup audio on component unmount
   useEffect(() => {
     return () => {
       speechService.stop();
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-        mediaRecorderRef.current.stop();
-      }
     };
   }, []);
 
@@ -231,55 +224,29 @@ const DailyWords: React.FC = () => {
   }, [speakingText, speakingMode]);
 
   const togglePractice = async (word: Word) => {
-    // If we are recording this word, stop it.
-    if (recordingForWord === word.word) {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-            mediaRecorderRef.current.stop();
-        }
-        setRecordingForWord(null);
-        return;
-    }
+    // Prevent starting if already recording (Web Speech handles one at a time)
+    if (recordingForWord) return;
     
-    // If recording another word, do nothing.
-    if (recordingForWord !== null) return;
-    
-    // Start new recording
+    setRecordingForWord(word.word);
+    setFeedbacks(prev => ({ ...prev, [word.word]: { status: 'assessing', message: 'استمع الآن...' }}));
+
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const recorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = recorder;
-        audioChunksRef.current = [];
+        const assessment = await evaluateSpeech(word.word);
 
-        setFeedbacks(prev => ({ ...prev, [word.word]: { status: 'idle', message: '' }}));
+        let status: PronunciationFeedback['status'];
+        if (assessment.score >= 1) status = 'success'; // Exact match
+        else if (assessment.score > 0.6) status = 'average'; // Close enough
+        else status = 'failure';
 
-        recorder.ondataavailable = event => {
-            audioChunksRef.current.push(event.data);
-        };
-
-        recorder.onstop = async () => {
-            stream.getTracks().forEach(track => track.stop()); // Clean up mic access
-            
-            setFeedbacks(prev => ({...prev, [word.word]: { status: 'assessing', message: 'جارٍ التقييم...' }}));
-
-            const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
-            
-            const assessment = await assessPronunciation(audioBlob, word.word);
-
-            let status: PronunciationFeedback['status'];
-            if (assessment.score > 0.85) status = 'success';
-            else if (assessment.score > 0.6) status = 'average';
-            else status = 'failure';
-
-            setFeedbacks(prev => ({...prev, [word.word]: { status: status, message: assessment.message }}));
-            setTimeout(() => setFeedbacks(prev => ({...prev, [word.word]: { status: 'idle', message: '' }})), 5000);
-            setRecordingForWord(null);
-        };
-
-        recorder.start();
-        setRecordingForWord(word.word);
+        setFeedbacks(prev => ({...prev, [word.word]: { status: status, message: assessment.message }}));
+        
+        // Clear feedback after 5 seconds
+        setTimeout(() => setFeedbacks(prev => ({...prev, [word.word]: { status: 'idle', message: '' }})), 5000);
+        
     } catch (err) {
-        console.error("Microphone access denied or error:", err);
-        setFeedbacks(prev => ({...prev, [word.word]: { status: 'failure', message: 'لم نتمكن من الوصول للميكروفون.' }}));
+        setFeedbacks(prev => ({...prev, [word.word]: { status: 'failure', message: 'حدث خطأ غير متوقع' }}));
+    } finally {
+        setRecordingForWord(null);
     }
   };
 
@@ -304,10 +271,10 @@ const DailyWords: React.FC = () => {
         </p>
       </div>
       
-       {!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && (
+       {!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) && (
         <div className="mb-8 p-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700">
           <p className="font-bold">تنبيه:</p>
-          <p>ميزة التدرب على النطق غير مدعومة في متصفحك الحالي لأنه لا يدعم الوصول للميكروفون.</p>
+          <p>ميزة التدرب على النطق غير مدعومة في متصفحك الحالي. يرجى استخدام Google Chrome أو Edge.</p>
         </div>
       )}
 
