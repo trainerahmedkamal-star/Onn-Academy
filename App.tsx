@@ -8,10 +8,12 @@ import AboutUs from './components/sections/AboutUs';
 import ContactUs from './components/sections/ContactUs';
 import Login from './components/sections/Login';
 import Subscription from './components/sections/Subscription';
+import VoiceSettingsModal from './components/modals/VoiceSettingsModal';
 import { Section } from './types';
 
 const App: React.FC = () => {
   const [activeSection, setActiveSection] = useState<Section>('home');
+  const [isVoiceSettingsOpen, setIsVoiceSettingsOpen] = useState(false);
 
   const handleNavigate = useCallback((section: Section) => {
     setActiveSection(section);
@@ -42,13 +44,22 @@ const App: React.FC = () => {
 
   return (
     <div className="bg-slate-50 min-h-screen font-sans text-gray-800">
-      <Navbar onNavigate={handleNavigate} activeSection={activeSection} />
+      <Navbar 
+        onNavigate={handleNavigate} 
+        activeSection={activeSection} 
+        onOpenSettings={() => setIsVoiceSettingsOpen(true)}
+      />
       <main>
         {renderSection()}
       </main>
       <footer className="bg-white border-t border-slate-200 py-6 text-center text-slate-500">
         <p>&copy; {new Date().getFullYear()} O'n Academy. جميع الحقوق محفوظة.</p>
       </footer>
+      
+      <VoiceSettingsModal 
+        isOpen={isVoiceSettingsOpen} 
+        onClose={() => setIsVoiceSettingsOpen(false)} 
+      />
     </div>
   );
 };

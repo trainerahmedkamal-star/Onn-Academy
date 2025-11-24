@@ -1,153 +1,130 @@
 /**
- * A service class to handle Text-to-Speech (TTS) using the Google Gemini API.
+ * A service class to handle Text-to-Speech (TTS) using the browser's native Web Speech API.
+ * This is free, unlimited, and works offline.
  */
-import { GoogleGenAI, Modality } from "@google/genai";
 
-// Base64 decoding function
-function decode(base64: string) {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
-// Custom function to decode raw PCM audio data into an AudioBuffer, as required by Gemini API.
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
-): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      // Normalize from 16-bit integer to floating point [-1, 1]
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
-}
-
-
-class GeminiSpeechService {
-  private audioContext: AudioContext | null = null;
-  private sourceNode: AudioBufferSourceNode | null = null;
-  private onEndCallback: (() => void) | null = null;
-  private currentSpokenText: string | null = null;
-  private ai: GoogleGenAI | null = null;
+class BrowserSpeechService {
+  private synthesis: SpeechSynthesis;
+  private voices: SpeechSynthesisVoice[] = [];
+  private selectedVoiceName: string | null = null;
+  private onVoicesChangedCallbacks: ((voices: SpeechSynthesisVoice[]) => void)[] = [];
 
   constructor() {
-    const apiKey = process.env.API_KEY;
-    if (apiKey) {
-        this.ai = new GoogleGenAI({ apiKey });
-    } else {
-        console.error("API_KEY environment variable not set. TTS will not work.");
+    this.synthesis = window.speechSynthesis;
+    
+    // Load saved preference
+    this.selectedVoiceName = localStorage.getItem('preferredVoice');
+
+    // Load voices immediately
+    this.loadVoices();
+    
+    // Some browsers load voices asynchronously
+    if (this.synthesis.onvoiceschanged !== undefined) {
+      this.synthesis.onvoiceschanged = () => {
+        this.loadVoices();
+      };
     }
   }
 
-  private getAudioContext(): AudioContext {
-    if (!this.audioContext || this.audioContext.state === 'closed') {
-      // Gemini TTS outputs at 24kHz sample rate
-      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+  private loadVoices() {
+    this.voices = this.synthesis.getVoices();
+    // Notify subscribers
+    this.onVoicesChangedCallbacks.forEach(cb => cb(this.voices));
+  }
+
+  /**
+   * Subscribe to voice list updates (needed because browsers load voices async)
+   */
+  public subscribeToVoices(callback: (voices: SpeechSynthesisVoice[]) => void) {
+    this.onVoicesChangedCallbacks.push(callback);
+    // If voices are already loaded, call immediately
+    if (this.voices.length > 0) {
+        callback(this.voices);
     }
-    if (this.audioContext.state === 'suspended') {
-      this.audioContext.resume();
+  }
+
+  public getEnglishVoices(): SpeechSynthesisVoice[] {
+    return this.voices.filter(v => v.lang.startsWith('en'));
+  }
+
+  public setPreferredVoice(voiceName: string) {
+    this.selectedVoiceName = voiceName;
+    localStorage.setItem('preferredVoice', voiceName);
+  }
+
+  public getPreferredVoiceName(): string | null {
+      return this.selectedVoiceName;
+  }
+
+  private getEffectiveVoice(): SpeechSynthesisVoice | null {
+    // 1. Try to use the user's selected voice
+    if (this.selectedVoiceName) {
+        const selected = this.voices.find(v => v.name === this.selectedVoiceName);
+        if (selected) return selected;
     }
-    return this.audioContext;
+
+    // 2. Try to find a specific high-quality Google US English voice
+    const googleUS = this.voices.find(v => v.name === 'Google US English');
+    if (googleUS) return googleUS;
+
+    // 3. Try to find any US English voice
+    const enUS = this.voices.find(v => v.lang === 'en-US');
+    if (enUS) return enUS;
+
+    // 4. Fallback to any English voice
+    const en = this.voices.find(v => v.lang.startsWith('en'));
+    if (en) return en;
+
+    // 5. Fallback to default
+    return null;
   }
 
   public isConfigured(): boolean {
-    return !!this.ai;
+    return true; // Web Speech API works without API keys
   }
 
-  public async speak(text: string, onStart: () => void, onEnd: () => void) {
-    if (this.isSpeaking()) {
-      const wasSameText = this.currentSpokenText === text;
-      this.stop();
-      if (wasSameText) {
-        return; // Just stop if same text is clicked again
-      }
+  public speak(text: string, onStart?: () => void, onEnd?: () => void) {
+    if (this.synthesis.speaking) {
+       this.stop();
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    const voice = this.getEffectiveVoice();
+    if (voice) {
+      utterance.voice = voice;
     }
     
-    if (!this.ai) {
-        console.error("Gemini AI not initialized. Cannot speak.");
-        onEnd();
-        return;
-    }
+    // Configure speech characteristics
+    utterance.lang = 'en-US';
+    utterance.rate = 0.9; // Slightly slower for learning
+    utterance.pitch = 1;
+    utterance.volume = 1;
 
-    onStart();
-    this.onEndCallback = onEnd;
-    this.currentSpokenText = text;
+    if (onStart) utterance.onstart = onStart;
+    
+    utterance.onend = () => {
+      if (onEnd) onEnd();
+    };
 
-    try {
-      const response = await this.ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: text }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: 'Kore' }, // A neutral, clear voice
-              },
-          },
-        },
-      });
+    utterance.onerror = (event) => {
+      console.error("TTS Error:", event);
+      if (onEnd) onEnd();
+    };
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-
-      if (!base64Audio) {
-        throw new Error("No audio data received from Gemini API.");
-      }
-      
-      const audioContext = this.getAudioContext();
-      const audioBytes = decode(base64Audio);
-      // Gemini TTS provides single-channel (mono) audio at 24000 Hz.
-      const audioBuffer = await decodeAudioData(audioBytes, audioContext, 24000, 1);
-      
-      this.sourceNode = audioContext.createBufferSource();
-      this.sourceNode.buffer = audioBuffer;
-      this.sourceNode.connect(audioContext.destination);
-      
-      this.sourceNode.onended = () => {
-        this.cleanUpState();
-      };
-      
-      this.sourceNode.start(0);
-
-    } catch (error) {
-      console.error("Error with Gemini TTS service:", error);
-      this.cleanUpState();
-    }
-  }
-
-  private cleanUpState() {
-     if (this.onEndCallback) {
-        this.onEndCallback();
-     }
-     this.sourceNode = null;
-     this.onEndCallback = null;
-     this.currentSpokenText = null;
+    this.synthesis.speak(utterance);
   }
 
   public stop() {
-    if (this.sourceNode) {
-        this.sourceNode.onended = null; // Prevent double-firing of cleanup
-        this.sourceNode.stop();
+    if (this.synthesis.speaking || this.synthesis.pending) {
+        this.synthesis.cancel();
     }
-    this.cleanUpState();
   }
 
   public isSpeaking(): boolean {
-    return !!this.sourceNode;
+    return this.synthesis.speaking;
   }
 }
 
 // Export a singleton instance so the entire app shares one speech manager.
-export const speechService = new GeminiSpeechService();
+export const speechService = new BrowserSpeechService();
