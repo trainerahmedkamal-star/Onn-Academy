@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { Message } from '../../types';
 import Button from '../Button';
@@ -5,7 +6,15 @@ import { getGeminiResponse } from '../../services/geminiService';
 import { dailyWordsData } from '../../data/words';
 import { speechService } from '../../services/ttsService';
 
-const SpeakerIcon = ({ onClick, isSpeaking }: { onClick: () => void, isSpeaking: boolean }) => {
+const SpeakerIcon = ({ onClick, isSpeaking, isLoading }: { onClick: () => void, isSpeaking: boolean, isLoading: boolean }) => {
+  if (isLoading) {
+    return (
+      <div className="h-6 w-6 flex items-center justify-center" title="جاري البحث عن صوت بشري...">
+           <div className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+  
   if (isSpeaking) {
     return (
       <div className="h-6 w-6 flex items-center justify-center cursor-pointer text-sky-500" onClick={onClick} title="إيقاف">
@@ -37,21 +46,30 @@ const ConversationPractice: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [speakingText, setSpeakingText] = useState<string | null>(null);
+  const [loadingText, setLoadingText] = useState<string | null>(null);
   
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const learnedWords = dailyWordsData.flatMap(daySet => daySet.words.map(word => word.word.toLowerCase()));
 
   const speak = useCallback((text: string) => {
+    // Stop if clicking the same text while it's speaking
     if (speechService.isSpeaking() && speakingText === text) {
       speechService.stop();
-    } else {
-      speechService.speak(
-        text,
-        () => setSpeakingText(text), // onStart
-        () => setSpeakingText(null)  // onEnd
-      );
+      return;
     }
+    
+    speechService.speakSmart(
+      text,
+      {
+        onLoading: (isLoading) => setLoadingText(isLoading ? text : null),
+        onStart: () => setSpeakingText(text),
+        onEnd: () => {
+            setSpeakingText(null);
+            setLoadingText(null);
+        }
+      }
+    );
   }, [speakingText]);
 
   useEffect(() => {
@@ -61,7 +79,8 @@ const ConversationPractice: React.FC = () => {
   // Auto-speak the first message
   useEffect(() => {
     if (speechService.isConfigured()) {
-        const timer = setTimeout(() => speak(messages[0].text), 100);
+        // Small delay to ensure interaction is possible
+        const timer = setTimeout(() => speak(messages[0].text), 500);
         return () => clearTimeout(timer);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,7 +135,11 @@ const ConversationPractice: React.FC = () => {
             <div key={msg.id} className={`flex items-end mb-4 gap-2 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
               
               {msg.sender === 'bot' && (
-                <SpeakerIcon onClick={() => speak(msg.text)} isSpeaking={speakingText === msg.text} />
+                <SpeakerIcon 
+                  onClick={() => speak(msg.text)} 
+                  isSpeaking={speakingText === msg.text} 
+                  isLoading={loadingText === msg.text}
+                />
               )}
 
               <div
