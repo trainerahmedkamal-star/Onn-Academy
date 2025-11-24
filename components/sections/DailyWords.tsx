@@ -11,7 +11,7 @@ import { assessPronunciation } from '../../services/pronunciationService';
 const SpeakerIcon = ({ onClick, isSpeaking, isLoading }: { onClick: () => void, isSpeaking: boolean, isLoading: boolean }) => {
   if (isLoading) {
       return (
-        <div className="h-6 w-6 flex items-center justify-center">
+        <div className="h-8 w-8 flex items-center justify-center bg-sky-50 rounded-full">
              <div className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" title="جاري تحميل الصوت البشري..."></div>
         </div>
       );
@@ -19,7 +19,7 @@ const SpeakerIcon = ({ onClick, isSpeaking, isLoading }: { onClick: () => void, 
   
   if (isSpeaking) {
     return (
-      <button className="h-6 w-6 flex items-center justify-center cursor-pointer" onClick={onClick} title="إيقاف">
+      <button className="h-10 w-10 flex items-center justify-center cursor-pointer bg-red-50 hover:bg-red-100 rounded-full transition-colors" onClick={onClick} title="إيقاف">
          <svg className="h-6 w-6 text-red-500 animate-pulse" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/>
         </svg>
@@ -29,7 +29,7 @@ const SpeakerIcon = ({ onClick, isSpeaking, isLoading }: { onClick: () => void, 
   return (
     <button
       onClick={onClick}
-      className={'text-sky-500 hover:text-sky-700 transition-colors focus:outline-none'}
+      className={'h-10 w-10 flex items-center justify-center bg-sky-50 hover:bg-sky-100 text-sky-600 rounded-full transition-colors focus:outline-none'}
       aria-label="الاستماع للنطق"
       title={'استمع (نطق بشري حقيقي)'}
     >
@@ -40,11 +40,23 @@ const SpeakerIcon = ({ onClick, isSpeaking, isLoading }: { onClick: () => void, 
   );
 };
 
+const TurtleIcon = ({ onClick, isSpeaking }: { onClick: () => void, isSpeaking: boolean }) => {
+    return (
+        <button
+            onClick={onClick}
+            className={`h-10 w-10 flex items-center justify-center rounded-full transition-colors focus:outline-none ${isSpeaking ? 'bg-amber-100 text-amber-600' : 'bg-slate-50 text-slate-400 hover:bg-amber-50 hover:text-amber-500'}`}
+            title="نطق بطيء (وضع السلحفاة)"
+        >
+            <span className="text-xl">🐢</span>
+        </button>
+    )
+}
+
 const MicIcon = ({ onClick, isRecording }: { onClick: () => void, isRecording: boolean }) => {
   return (
     <button
       onClick={onClick}
-      className={`transition-colors focus:outline-none ${isRecording ? 'text-red-500 animate-pulse' : 'text-slate-400 hover:text-sky-600'}`}
+      className={`h-10 w-10 flex items-center justify-center rounded-full transition-colors focus:outline-none ${isRecording ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-slate-50 text-slate-400 hover:bg-sky-50 hover:text-sky-600'}`}
       aria-label={isRecording ? 'إيقاف التسجيل' : 'تدرب على النطق'}
       title={isRecording ? 'إيقاف التسجيل' : 'تدرب على النطق'}
     >
@@ -65,15 +77,16 @@ interface PronunciationFeedback {
 
 interface WordCardProps {
   word: Word;
-  speak: (text: string, audioUrl?: string) => void;
+  speak: (text: string, slow?: boolean, audioUrl?: string) => void;
   speakingText: string | null;
+  speakingMode: 'normal' | 'slow' | null;
   loadingWord: string | null;
   practice: () => void;
   isRecording: boolean;
   feedback: PronunciationFeedback;
 }
 
-const WordCard: React.FC<WordCardProps> = React.memo(({ word, speak, speakingText, loadingWord, practice, isRecording, feedback }) => {
+const WordCard: React.FC<WordCardProps> = React.memo(({ word, speak, speakingText, speakingMode, loadingWord, practice, isRecording, feedback }) => {
   
   const getFeedbackStyles = () => {
     switch(feedback.status) {
@@ -87,37 +100,48 @@ const WordCard: React.FC<WordCardProps> = React.memo(({ word, speak, speakingTex
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-lg transition-all transform hover:-translate-y-1">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-4">
-          <div>
-            <h3 className="text-2xl font-bold text-slate-800" lang="en">{word.word}</h3>
-            <p className="text-lg text-sky-600 font-semibold">{word.translation}</p>
-          </div>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+        <div>
+          <h3 className="text-3xl font-bold text-slate-800 mb-1" lang="en">{word.word}</h3>
+          <p className="text-lg text-sky-600 font-semibold">{word.translation}</p>
+        </div>
+        
+        <div className="flex items-center gap-3">
           <SpeakerIcon 
-             onClick={() => speak(word.word, word.audioUrl)} 
-             isSpeaking={speakingText === word.word}
+             onClick={() => speak(word.word, false, word.audioUrl)} 
+             isSpeaking={speakingText === word.word && speakingMode === 'normal'}
              isLoading={loadingWord === word.word}
           />
+          <TurtleIcon 
+             onClick={() => speak(word.word, true, word.audioUrl)}
+             isSpeaking={speakingText === word.word && speakingMode === 'slow'}
+          />
+          <div className="w-px h-8 bg-slate-200 mx-1"></div>
           <MicIcon onClick={practice} isRecording={isRecording} />
         </div>
       </div>
+      
       {feedback.status !== 'idle' && (
           <div className={`mt-2 p-2 rounded-lg text-center text-sm font-semibold transition-all duration-300 ${getFeedbackStyles()}`}>
               {feedback.message}
           </div>
       )}
-      <div className="pt-4 border-t border-slate-200">
+      
+      <div className="pt-4 border-t border-slate-200 mt-2">
         <ul className="space-y-3 text-slate-600" lang="en">
           {word.examples.map((example, index) => (
-            <li key={index} className="flex items-center gap-3">
-               <span className="text-sky-500 text-lg">•</span>
-               <span className="flex-1">{example}</span>
-               {/* Examples are sentences, so they will likely use TTS, but speakSmart handles this logic */}
-               <SpeakerIcon 
-                  onClick={() => speak(example)} 
-                  isSpeaking={speakingText === example} 
-                  isLoading={loadingWord === example}
-               />
+            <li key={index} className="flex items-start gap-3 group">
+               <span className="text-sky-500 text-lg mt-0.5">•</span>
+               <div className="flex-1 cursor-pointer hover:text-sky-700 transition-colors" onClick={() => speak(example)}>
+                   {example}
+               </div>
+               <button 
+                  onClick={(e) => { e.stopPropagation(); speak(example, true); }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-amber-500"
+                  title="نطق بطيء"
+               >
+                   🐢
+               </button>
             </li>
           ))}
         </ul>
@@ -131,6 +155,7 @@ const DailyWords: React.FC = () => {
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
   const [completedDays, setCompletedDays] = useState<Set<number>>(new Set());
   const [speakingText, setSpeakingText] = useState<string | null>(null);
+  const [speakingMode, setSpeakingMode] = useState<'normal' | 'slow' | null>(null);
   const [loadingWord, setLoadingWord] = useState<string | null>(null);
   const [recordingForWord, setRecordingForWord] = useState<string | null>(null);
   const [feedbacks, setFeedbacks] = useState<Record<string, PronunciationFeedback>>({});
@@ -169,30 +194,41 @@ const DailyWords: React.FC = () => {
     };
   }, []);
 
-  const speak = useCallback((text: string, audioUrl?: string) => {
-    // If the clicked text is already speaking, stop it.
-    if (speechService.isSpeaking() && speakingText === text) {
+  const speak = useCallback((text: string, slow: boolean = false, audioUrl?: string) => {
+    const mode = slow ? 'slow' : 'normal';
+
+    // If the clicked text is already speaking in the same mode, stop it.
+    if (speechService.isSpeaking() && speakingText === text && speakingMode === mode) {
       speechService.stop();
       return;
     }
     
+    // Determine rate: 0.5 for slow mode, undefined (use default) for normal
+    const rateOverride = slow ? 0.5 : undefined;
+
     // If explicitly provided audioUrl (from local data), use it directly
     if (audioUrl) {
-         speechService.playAudio(audioUrl, () => setSpeakingText(text), () => setSpeakingText(null));
+         speechService.playAudio(
+             audioUrl, 
+             () => { setSpeakingText(text); setSpeakingMode(mode); }, 
+             () => { setSpeakingText(null); setSpeakingMode(null); },
+             rateOverride
+         );
          return;
     }
 
-    // Use Smart Speak (Fetches Real Audio -> Falls back to TTS)
+    // Use Smart Speak
     speechService.speakSmart(text, {
         onLoading: (isLoading) => setLoadingWord(isLoading ? text : null),
-        onStart: () => setSpeakingText(text),
+        onStart: () => { setSpeakingText(text); setSpeakingMode(mode); },
         onEnd: () => {
             setSpeakingText(null);
             setLoadingWord(null);
+            setSpeakingMode(null);
         }
-    });
+    }, rateOverride);
 
-  }, [speakingText]);
+  }, [speakingText, speakingMode]);
 
   const togglePractice = async (word: Word) => {
     // If we are recording this word, stop it.
@@ -300,6 +336,7 @@ const DailyWords: React.FC = () => {
               word={word} 
               speak={speak} 
               speakingText={speakingText}
+              speakingMode={speakingMode}
               loadingWord={loadingWord}
               practice={() => togglePractice(word)}
               isRecording={recordingForWord === word.word}

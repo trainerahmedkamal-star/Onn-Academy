@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <rect width="192" height="192" fill="#0ea5e9" rx="30" />
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="100" fill="white">O'n</text>
+  <path d="M 96,140 Q 110,150 124,140" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" />
+</svg>

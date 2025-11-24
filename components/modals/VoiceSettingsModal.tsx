@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Button from '../Button';
-import { speechService } from '../../services/ttsService';
+import { speechService, EnglishAccent } from '../../services/ttsService';
 
 interface VoiceSettingsModalProps {
   isOpen: boolean;
@@ -13,6 +13,7 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
   const [selectedVoice, setSelectedVoice] = useState<string>('');
   const [rate, setRate] = useState<number>(0.9);
   const [pitch, setPitch] = useState<number>(1);
+  const [accent, setAccent] = useState<EnglishAccent>('US');
   const [isPlaying, setIsPlaying] = useState(false);
 
   useEffect(() => {
@@ -26,13 +27,14 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
         if (preferred && currentVoices.some(v => v.name === preferred)) {
             setSelectedVoice(preferred);
         } else if (currentVoices.length > 0) {
-             // Default logic to select the best initial voice (Google or US)
-             const bestDefault = currentVoices.find(v => v.name === 'Google US English') || currentVoices.find(v => v.lang === 'en-US') || currentVoices[0];
-             setSelectedVoice(bestDefault.name);
+             // Default selection logic handled in service, but for UI we pick first match
+             const bestDefault = currentVoices.find(v => v.lang.includes(accent === 'US' ? 'US' : 'GB')) || currentVoices[0];
+             if (bestDefault) setSelectedVoice(bestDefault.name);
         }
 
         setRate(speechService.getRate());
         setPitch(speechService.getPitch());
+        setAccent(speechService.getAccent());
 
         // Subscribe to updates (in case voices load late)
         speechService.subscribeToVoices((allVoices) => {
@@ -43,21 +45,26 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
   }, [isOpen]);
 
   const handleSave = () => {
-    speechService.setPreferredVoice(selectedVoice);
+    speechService.setAccent(accent); // Save accent first to affect voice selection logic if 'Default' logic is used
+    if (selectedVoice) {
+      speechService.setPreferredVoice(selectedVoice);
+    }
     speechService.setRate(rate);
     speechService.setPitch(pitch);
     onClose();
   };
 
   const handleTest = () => {
-    // Update service temporarily for the test (we save explicitly on Save)
+    // Update service temporarily for the test
+    speechService.setAccent(accent);
     speechService.setPreferredVoice(selectedVoice);
     speechService.setRate(rate);
     speechService.setPitch(pitch);
     
     setIsPlaying(true);
+    const text = accent === 'US' ? "Hello! This is American English." : "Hello! This is British English.";
     speechService.speak(
-        "Hello! I can speak fast or slow. How is this?", 
+        text, 
         () => {}, 
         () => {
             setIsPlaying(false);
@@ -68,6 +75,7 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
   const handleReset = () => {
       setRate(0.9);
       setPitch(1);
+      setAccent('US');
   };
 
   if (!isOpen) return null;
@@ -89,7 +97,7 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
                 </h3>
                 <div className="mt-4 space-y-6">
                   <p className="text-sm text-gray-500">
-                    قم بتخصيص تجربة الاستماع حسب مستواك.
+                    قم بتخصيص تجربة الاستماع حسب مستواك واللهجة المفضلة.
                   </p>
                   
                   {voices.length === 0 ? (
@@ -98,27 +106,40 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
                       </div>
                   ) : (
                       <div className="space-y-5">
-                          {/* Voice Selection */}
+                          
+                          {/* Accent Selection */}
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">صوت القارئ:</label>
-                            <select 
-                                value={selectedVoice} 
-                                onChange={(e) => setSelectedVoice(e.target.value)}
-                                className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
-                                lang="en"
-                            >
-                                {voices.map(voice => (
-                                    <option key={voice.name} value={voice.name}>
-                                        {voice.name} ({voice.lang})
-                                    </option>
-                                ))}
-                            </select>
+                             <label className="block text-sm font-medium text-gray-700 mb-2">اللهجة (Accent):</label>
+                             <div className="flex rounded-md shadow-sm" role="group">
+                                <button
+                                    type="button"
+                                    onClick={() => setAccent('US')}
+                                    className={`flex-1 px-4 py-2 text-sm font-medium border rounded-r-lg focus:z-10 focus:ring-2 focus:ring-sky-500 ${
+                                        accent === 'US' 
+                                        ? 'bg-sky-500 text-white border-sky-500' 
+                                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                    }`}
+                                >
+                                    🇺🇸 أمريكي
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setAccent('UK')}
+                                    className={`flex-1 px-4 py-2 text-sm font-medium border border-l-0 rounded-l-lg focus:z-10 focus:ring-2 focus:ring-sky-500 ${
+                                        accent === 'UK' 
+                                        ? 'bg-sky-500 text-white border-sky-500' 
+                                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                    }`}
+                                >
+                                    🇬🇧 بريطاني
+                                </button>
+                             </div>
                           </div>
 
                           {/* Speed Slider */}
                           <div>
                               <div className="flex justify-between items-center mb-1">
-                                  <label className="block text-sm font-medium text-gray-700">سرعة القراءة (Speed)</label>
+                                  <label className="block text-sm font-medium text-gray-700">سرعة القراءة</label>
                                   <span className="text-xs font-bold text-sky-600 bg-sky-100 px-2 py-0.5 rounded">{rate}x</span>
                               </div>
                               <input 
@@ -131,7 +152,7 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
                                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-sky-500"
                               />
                               <div className="flex justify-between text-xs text-gray-400 mt-1">
-                                  <span>بطيء جداً</span>
+                                  <span>بطيء</span>
                                   <span>عادي</span>
                                   <span>سريع</span>
                               </div>
@@ -140,7 +161,7 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
                           {/* Pitch Slider */}
                           <div>
                               <div className="flex justify-between items-center mb-1">
-                                  <label className="block text-sm font-medium text-gray-700">حدة الصوت (Tone)</label>
+                                  <label className="block text-sm font-medium text-gray-700">حدة الصوت</label>
                                   <span className="text-xs font-bold text-sky-600 bg-sky-100 px-2 py-0.5 rounded">{pitch}</span>
                               </div>
                               <input 
@@ -152,11 +173,25 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
                                 onChange={(e) => setPitch(parseFloat(e.target.value))}
                                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-sky-500"
                               />
-                              <div className="flex justify-between text-xs text-gray-400 mt-1">
-                                  <span>عميق</span>
-                                  <span>طبيعي</span>
-                                  <span>حاد</span>
-                              </div>
+                          </div>
+
+                           {/* Voice Selection (Detailed) */}
+                           <div className="pt-2 border-t border-gray-100">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">صوت القارئ (متقدم):</label>
+                            <select 
+                                value={selectedVoice} 
+                                onChange={(e) => setSelectedVoice(e.target.value)}
+                                className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm text-xs"
+                                lang="en"
+                            >
+                                {voices
+                                  .sort((a, b) => (a.lang === (accent === 'US' ? 'en-US' : 'en-GB') ? -1 : 1))
+                                  .map(voice => (
+                                    <option key={voice.name} value={voice.name}>
+                                        {voice.name} ({voice.lang})
+                                    </option>
+                                ))}
+                            </select>
                           </div>
                           
                           <div className="flex justify-between items-center pt-2">
@@ -180,7 +215,7 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
                                         جاري التحدث...
                                     </span>
                                 ) : (
-                                    <>🔊 تجربة الإعدادات</>
+                                    <>🔊 تجربة</>
                                 )}
                               </button>
                           </div>

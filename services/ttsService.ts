@@ -4,6 +4,8 @@
  * AND pre-recorded audio files playback.
  */
 
+export type EnglishAccent = 'US' | 'UK';
+
 class BrowserSpeechService {
   private synthesis: SpeechSynthesis;
   private voices: SpeechSynthesisVoice[] = [];
@@ -11,6 +13,7 @@ class BrowserSpeechService {
   // Default values: Rate 0.9 (slightly slow for learning), Pitch 1 (normal)
   private rate: number = 0.9; 
   private pitch: number = 1;
+  private accent: EnglishAccent = 'US'; // Default to American English
   
   private onVoicesChangedCallbacks: ((voices: SpeechSynthesisVoice[]) => void)[] = [];
   private currentUtterance: SpeechSynthesisUtterance | null = null;
@@ -30,6 +33,11 @@ class BrowserSpeechService {
 
     const savedPitch = localStorage.getItem('voicePitch');
     if (savedPitch) this.pitch = parseFloat(savedPitch);
+
+    const savedAccent = localStorage.getItem('voiceAccent');
+    if (savedAccent && (savedAccent === 'US' || savedAccent === 'UK')) {
+        this.accent = savedAccent as EnglishAccent;
+    }
 
     // Load voices immediately
     this.loadVoices();
@@ -90,6 +98,19 @@ class BrowserSpeechService {
       return this.pitch;
   }
 
+  public setAccent(accent: EnglishAccent) {
+      this.accent = accent;
+      localStorage.setItem('voiceAccent', accent);
+      // Reset preferred voice if specific manual override wasn't set to ensure new accent takes effect automatically
+      if (!localStorage.getItem('preferredVoice')) {
+          this.selectedVoiceName = null; 
+      }
+  }
+
+  public getAccent(): EnglishAccent {
+      return this.accent;
+  }
+
   private getEffectiveVoice(): SpeechSynthesisVoice | null {
     // 1. Try to use the user's selected voice
     if (this.selectedVoiceName) {
@@ -97,27 +118,26 @@ class BrowserSpeechService {
         if (selected) return selected;
     }
 
-    // 2. Priority List for Auto-Selection (Mobile & Desktop)
+    // 2. Filter by Accent (Region)
+    const targetRegion = this.accent === 'US' ? 'en-US' : 'en-GB';
+    const regionVoices = this.voices.filter(v => v.lang === targetRegion);
+
+    // 3. Priority List for Auto-Selection within Region
     
-    // A. "Google US English" (Chrome Desktop/Android standard)
-    const googleUS = this.voices.find(v => v.name === 'Google US English');
-    if (googleUS) return googleUS;
+    // A. "Google" voices for that region
+    const googleVoice = regionVoices.find(v => v.name.includes('Google'));
+    if (googleVoice) return googleVoice;
 
-    // B. "Natural" voices (Edge/Android often label high quality voices as Natural)
-    const naturalVoice = this.voices.find(v => v.lang === 'en-US' && v.name.includes('Natural'));
-    if (naturalVoice) return naturalVoice;
-
-    // C. "Premium" or "Enhanced" voices (iOS/macOS often use these labels)
-    const premiumVoice = this.voices.find(v => v.lang === 'en-US' && (v.name.includes('Premium') || v.name.includes('Enhanced')));
+    // B. "Natural" / "Premium" voices
+    const premiumVoice = regionVoices.find(v => v.name.includes('Natural') || v.name.includes('Premium') || v.name.includes('Enhanced'));
     if (premiumVoice) return premiumVoice;
 
-    // 3. Fallback to any US English voice
-    const enUS = this.voices.find(v => v.lang === 'en-US');
-    if (enUS) return enUS;
+    // C. Any voice from that region
+    if (regionVoices.length > 0) return regionVoices[0];
 
-    // 4. Fallback to any English voice (UK, AU, etc.)
-    const en = this.voices.find(v => v.lang.startsWith('en'));
-    if (en) return en;
+    // 4. Fallback: Any English voice (if preferred region not found)
+    const anyEnglish = this.voices.find(v => v.lang.startsWith('en'));
+    if (anyEnglish) return anyEnglish;
 
     // 5. Fallback to default
     return null;
@@ -130,7 +150,7 @@ class BrowserSpeechService {
   /**
    * Plays a pre-recorded audio file.
    */
-  public playAudio(url: string, onStart?: () => void, onEnd?: () => void) {
+  public playAudio(url: string, onStart?: () => void, onEnd?: () => void, rateOverride?: number) {
       this.stop(); // Stop any current TTS or Audio
 
       // Fix protocol-relative URLs (sometimes API returns //ssl.gstatic...)
@@ -140,9 +160,8 @@ class BrowserSpeechService {
       this.currentAudio = audio;
       
       // Apply rate to audio files (HTML5 Audio supports this)
-      audio.playbackRate = this.rate;
-      // Pitch cannot be easily changed for HTML5 Audio without Web Audio API, so we skip pitch for real audio
-
+      audio.playbackRate = rateOverride !== undefined ? rateOverride : this.rate;
+      
       audio.onplay = () => {
           if (onStart) onStart();
       };
@@ -173,30 +192,29 @@ class BrowserSpeechService {
           onLoading?: (state: boolean) => void;
           onStart?: () => void; 
           onEnd?: () => void; 
-      }
+      },
+      rateOverride?: number
   ) {
       this.stop();
 
-      // Clean the text but keep spaces for phrases like "thank you"
-      // Allow apostrophes for words like "don't", "it's"
       const cleanText = text.trim().toLowerCase().replace(/[^a-z0-9\s']/g, '');
-      
-      // Heuristic: Only attempt to fetch audio for short phrases (up to 4 words)
-      // Long sentences won't exist in a dictionary.
       const wordCount = cleanText.split(/\s+/).length;
       const isShortPhrase = wordCount <= 4;
 
       // If it's a long sentence, go straight to TTS
       if (!isShortPhrase) {
           console.log(`TTS (Long sentence): "${text}"`);
-          this.speak(text, callbacks?.onStart, callbacks?.onEnd);
+          this.speak(text, callbacks?.onStart, callbacks?.onEnd, rateOverride);
           return;
       }
 
+      // Generate a cache key that includes the accent preference
+      const cacheKey = `${cleanText}_${this.accent}`;
+
       // Check cache first
-      if (this.audioCache.has(cleanText)) {
-          console.log(`Smart Audio (Cache): "${cleanText}"`);
-          this.playAudio(this.audioCache.get(cleanText)!, callbacks?.onStart, callbacks?.onEnd);
+      if (this.audioCache.has(cacheKey)) {
+          console.log(`Smart Audio (Cache): "${cleanText}" (${this.accent})`);
+          this.playAudio(this.audioCache.get(cacheKey)!, callbacks?.onStart, callbacks?.onEnd, rateOverride);
           return;
       }
 
@@ -205,45 +223,54 @@ class BrowserSpeechService {
       
       let audioUrl: string | null = null;
       try {
-          // console.log(`Fetching audio for: "${cleanText}"...`);
           const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(cleanText)}`);
           if (response.ok) {
               const data = await response.json();
-              // Find the first valid audio in phonetics
+              
               if (Array.isArray(data) && data.length > 0) {
-                  // Sometimes the audio is in the first entry, sometimes in others
+                  // Iterate through entries to find the best matching audio for the accent
                   for (const entry of data) {
                       const phonetics = entry.phonetics || [];
-                      const audioEntry = phonetics.find((p: any) => p.audio && p.audio.length > 0);
-                      if (audioEntry) {
-                          audioUrl = audioEntry.audio;
-                          break;
+                      
+                      // Filter for audio that exists
+                      const validPhonetics = phonetics.filter((p: any) => p.audio && p.audio.length > 0);
+                      
+                      // Try to find exact accent match first
+                      // US usually has '-us.mp3', UK usually has '-uk.mp3'
+                      const targetTag = this.accent === 'US' ? '-us.mp3' : '-uk.mp3';
+                      const preferredAudio = validPhonetics.find((p: any) => p.audio.includes(targetTag));
+
+                      if (preferredAudio) {
+                          audioUrl = preferredAudio.audio;
+                          break; // Found perfect match
+                      } else if (validPhonetics.length > 0 && !audioUrl) {
+                          // Fallback to first available if we haven't found anything yet
+                          audioUrl = validPhonetics[0].audio;
                       }
                   }
               }
           }
       } catch (err) {
-          // Silent fail, proceed to TTS
-          // console.warn("Error fetching real audio:", err); 
+          // Silent fail
       }
 
       if (callbacks?.onLoading) callbacks.onLoading(false);
 
       if (audioUrl) {
           console.log(`Smart Audio (Found): "${cleanText}"`);
-          this.audioCache.set(cleanText, audioUrl);
-          this.playAudio(audioUrl, callbacks?.onStart, callbacks?.onEnd);
+          this.audioCache.set(cacheKey, audioUrl);
+          this.playAudio(audioUrl, callbacks?.onStart, callbacks?.onEnd, rateOverride);
       } else {
           // Fallback to Robot TTS if no real audio found
           console.log(`TTS (Fallback): "${text}"`);
-          this.speak(text, callbacks?.onStart, callbacks?.onEnd);
+          this.speak(text, callbacks?.onStart, callbacks?.onEnd, rateOverride);
       }
   }
 
   /**
    * Speaks text using the browser's TTS engine.
    */
-  public speak(text: string, onStart?: () => void, onEnd?: () => void) {
+  public speak(text: string, onStart?: () => void, onEnd?: () => void, rateOverride?: number) {
     // Cancel any ongoing speech or audio before starting new one
     this.stop();
 
@@ -255,9 +282,11 @@ class BrowserSpeechService {
       utterance.voice = voice;
     }
     
-    // Configure speech characteristics based on saved preferences
-    utterance.lang = 'en-US';
-    utterance.rate = this.rate;
+    // Configure speech characteristics
+    utterance.lang = this.accent === 'US' ? 'en-US' : 'en-GB';
+    
+    // Use override if provided, otherwise use saved preference
+    utterance.rate = rateOverride !== undefined ? rateOverride : this.rate;
     utterance.pitch = this.pitch;
     utterance.volume = 1;
 
@@ -269,7 +298,6 @@ class BrowserSpeechService {
     };
 
     utterance.onerror = (event) => {
-      // 'canceled' or 'interrupted' errors happen when we call stop() or speak() while already speaking.
       if (event.error === 'canceled' || event.error === 'interrupted') {
           if (onEnd) onEnd(); 
           return;
