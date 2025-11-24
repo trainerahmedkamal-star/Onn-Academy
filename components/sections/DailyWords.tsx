@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { dailyWordsData } from '../../data/words';
 import type { Word } from '../../types';
@@ -7,11 +8,19 @@ import { speechService } from '../../services/ttsService';
 import { assessPronunciation } from '../../services/pronunciationService';
 
 
-const SpeakerIcon = ({ onClick, isSpeaking }: { onClick: () => void, isSpeaking: boolean }) => {
+const SpeakerIcon = ({ onClick, isSpeaking, isLoading }: { onClick: () => void, isSpeaking: boolean, isLoading: boolean }) => {
+  if (isLoading) {
+      return (
+        <div className="h-6 w-6 flex items-center justify-center">
+             <div className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" title="جاري تحميل الصوت البشري..."></div>
+        </div>
+      );
+  }
+  
   if (isSpeaking) {
     return (
       <button className="h-6 w-6 flex items-center justify-center cursor-pointer" onClick={onClick} title="إيقاف">
-         <svg className="h-6 w-6 text-red-500 animate-pulse" xmlns="http://www.w.org/2000/svg" fill="currentColor" viewBox="0 0 24 24">
+         <svg className="h-6 w-6 text-red-500 animate-pulse" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/>
         </svg>
       </button>
@@ -22,7 +31,7 @@ const SpeakerIcon = ({ onClick, isSpeaking }: { onClick: () => void, isSpeaking:
       onClick={onClick}
       className={'text-sky-500 hover:text-sky-700 transition-colors focus:outline-none'}
       aria-label="الاستماع للنطق"
-      title={'استمع'}
+      title={'استمع (نطق بشري حقيقي)'}
     >
       <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
@@ -56,14 +65,15 @@ interface PronunciationFeedback {
 
 interface WordCardProps {
   word: Word;
-  speak: (text: string) => void;
+  speak: (text: string, audioUrl?: string) => void;
   speakingText: string | null;
+  loadingWord: string | null;
   practice: () => void;
   isRecording: boolean;
   feedback: PronunciationFeedback;
 }
 
-const WordCard: React.FC<WordCardProps> = React.memo(({ word, speak, speakingText, practice, isRecording, feedback }) => {
+const WordCard: React.FC<WordCardProps> = React.memo(({ word, speak, speakingText, loadingWord, practice, isRecording, feedback }) => {
   
   const getFeedbackStyles = () => {
     switch(feedback.status) {
@@ -83,7 +93,11 @@ const WordCard: React.FC<WordCardProps> = React.memo(({ word, speak, speakingTex
             <h3 className="text-2xl font-bold text-slate-800" lang="en">{word.word}</h3>
             <p className="text-lg text-sky-600 font-semibold">{word.translation}</p>
           </div>
-          <SpeakerIcon onClick={() => speak(word.word)} isSpeaking={speakingText === word.word} />
+          <SpeakerIcon 
+             onClick={() => speak(word.word, word.audioUrl)} 
+             isSpeaking={speakingText === word.word}
+             isLoading={loadingWord === word.word}
+          />
           <MicIcon onClick={practice} isRecording={isRecording} />
         </div>
       </div>
@@ -98,7 +112,12 @@ const WordCard: React.FC<WordCardProps> = React.memo(({ word, speak, speakingTex
             <li key={index} className="flex items-center gap-3">
                <span className="text-sky-500 text-lg">•</span>
                <span className="flex-1">{example}</span>
-               <SpeakerIcon onClick={() => speak(example)} isSpeaking={speakingText === example} />
+               {/* Examples are sentences, so they will likely use TTS, but speakSmart handles this logic */}
+               <SpeakerIcon 
+                  onClick={() => speak(example)} 
+                  isSpeaking={speakingText === example} 
+                  isLoading={loadingWord === example}
+               />
             </li>
           ))}
         </ul>
@@ -112,6 +131,7 @@ const DailyWords: React.FC = () => {
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
   const [completedDays, setCompletedDays] = useState<Set<number>>(new Set());
   const [speakingText, setSpeakingText] = useState<string | null>(null);
+  const [loadingWord, setLoadingWord] = useState<string | null>(null);
   const [recordingForWord, setRecordingForWord] = useState<string | null>(null);
   const [feedbacks, setFeedbacks] = useState<Record<string, PronunciationFeedback>>({});
 
@@ -149,18 +169,29 @@ const DailyWords: React.FC = () => {
     };
   }, []);
 
-  const speak = useCallback((text: string) => {
+  const speak = useCallback((text: string, audioUrl?: string) => {
     // If the clicked text is already speaking, stop it.
     if (speechService.isSpeaking() && speakingText === text) {
       speechService.stop();
-    } else {
-      // Otherwise, speak the new text.
-      speechService.speak(
-        text,
-        () => setSpeakingText(text), // onStart
-        () => setSpeakingText(null)  // onEnd
-      );
+      return;
     }
+    
+    // If explicitly provided audioUrl (from local data), use it directly
+    if (audioUrl) {
+         speechService.playAudio(audioUrl, () => setSpeakingText(text), () => setSpeakingText(null));
+         return;
+    }
+
+    // Use Smart Speak (Fetches Real Audio -> Falls back to TTS)
+    speechService.speakSmart(text, {
+        onLoading: (isLoading) => setLoadingWord(isLoading ? text : null),
+        onStart: () => setSpeakingText(text),
+        onEnd: () => {
+            setSpeakingText(null);
+            setLoadingWord(null);
+        }
+    });
+
   }, [speakingText]);
 
   const togglePractice = async (word: Word) => {
@@ -269,6 +300,7 @@ const DailyWords: React.FC = () => {
               word={word} 
               speak={speak} 
               speakingText={speakingText}
+              loadingWord={loadingWord}
               practice={() => togglePractice(word)}
               isRecording={recordingForWord === word.word}
               feedback={feedbacks[word.word] || { status: 'idle', message: '' }}

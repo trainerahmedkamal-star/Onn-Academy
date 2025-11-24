@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import Button from '../Button';
 import { speechService } from '../../services/ttsService';
@@ -10,6 +11,8 @@ interface VoiceSettingsModalProps {
 const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose }) => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<string>('');
+  const [rate, setRate] = useState<number>(0.9);
+  const [pitch, setPitch] = useState<number>(1);
   const [isPlaying, setIsPlaying] = useState(false);
 
   useEffect(() => {
@@ -18,6 +21,7 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
         const currentVoices = speechService.getEnglishVoices();
         setVoices(currentVoices);
         
+        // Load settings
         const preferred = speechService.getPreferredVoiceName();
         if (preferred && currentVoices.some(v => v.name === preferred)) {
             setSelectedVoice(preferred);
@@ -26,6 +30,9 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
              const bestDefault = currentVoices.find(v => v.name === 'Google US English') || currentVoices.find(v => v.lang === 'en-US') || currentVoices[0];
              setSelectedVoice(bestDefault.name);
         }
+
+        setRate(speechService.getRate());
+        setPitch(speechService.getPitch());
 
         // Subscribe to updates (in case voices load late)
         speechService.subscribeToVoices((allVoices) => {
@@ -37,23 +44,30 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
 
   const handleSave = () => {
     speechService.setPreferredVoice(selectedVoice);
+    speechService.setRate(rate);
+    speechService.setPitch(pitch);
     onClose();
   };
 
   const handleTest = () => {
-    // Temporarily set the voice to test it without saving
-    const originalVoice = speechService.getPreferredVoiceName();
+    // Update service temporarily for the test (we save explicitly on Save)
     speechService.setPreferredVoice(selectedVoice);
+    speechService.setRate(rate);
+    speechService.setPitch(pitch);
     
     setIsPlaying(true);
     speechService.speak(
-        "Hello! This is how I sound. Do you like this voice?", 
+        "Hello! I can speak fast or slow. How is this?", 
         () => {}, 
         () => {
             setIsPlaying(false);
-            // Revert if not saved (optional, but keep it simple: we set it as preferred for the test)
         }
     );
+  };
+
+  const handleReset = () => {
+      setRate(0.9);
+      setPitch(1);
   };
 
   if (!isOpen) return null;
@@ -73,39 +87,101 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
                 <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
                   إعدادات الصوت
                 </h3>
-                <div className="mt-2">
-                  <p className="text-sm text-gray-500 mb-4">
-                    اختر الصوت المفضل لديك لقراءة الكلمات والجمل الإنجليزية. الأصوات المتاحة تعتمد على جهازك والمتصفح.
+                <div className="mt-4 space-y-6">
+                  <p className="text-sm text-gray-500">
+                    قم بتخصيص تجربة الاستماع حسب مستواك.
                   </p>
                   
                   {voices.length === 0 ? (
                       <div className="p-4 bg-yellow-50 text-yellow-700 rounded-md text-sm">
-                          جاري تحميل الأصوات... أو لا توجد أصوات إنجليزية متاحة في هذا المتصفح.
+                          جاري تحميل الأصوات...
                       </div>
                   ) : (
-                      <div className="space-y-4">
-                          <label className="block text-sm font-medium text-gray-700">اختر الصوت:</label>
-                          <select 
-                            value={selectedVoice} 
-                            onChange={(e) => setSelectedVoice(e.target.value)}
-                            className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
-                            lang="en"
-                          >
-                            {voices.map(voice => (
-                                <option key={voice.name} value={voice.name}>
-                                    {voice.name} ({voice.lang})
-                                </option>
-                            ))}
-                          </select>
+                      <div className="space-y-5">
+                          {/* Voice Selection */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">صوت القارئ:</label>
+                            <select 
+                                value={selectedVoice} 
+                                onChange={(e) => setSelectedVoice(e.target.value)}
+                                className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
+                                lang="en"
+                            >
+                                {voices.map(voice => (
+                                    <option key={voice.name} value={voice.name}>
+                                        {voice.name} ({voice.lang})
+                                    </option>
+                                ))}
+                            </select>
+                          </div>
+
+                          {/* Speed Slider */}
+                          <div>
+                              <div className="flex justify-between items-center mb-1">
+                                  <label className="block text-sm font-medium text-gray-700">سرعة القراءة (Speed)</label>
+                                  <span className="text-xs font-bold text-sky-600 bg-sky-100 px-2 py-0.5 rounded">{rate}x</span>
+                              </div>
+                              <input 
+                                type="range" 
+                                min="0.5" 
+                                max="2" 
+                                step="0.1" 
+                                value={rate} 
+                                onChange={(e) => setRate(parseFloat(e.target.value))}
+                                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-sky-500"
+                              />
+                              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                                  <span>بطيء جداً</span>
+                                  <span>عادي</span>
+                                  <span>سريع</span>
+                              </div>
+                          </div>
+
+                          {/* Pitch Slider */}
+                          <div>
+                              <div className="flex justify-between items-center mb-1">
+                                  <label className="block text-sm font-medium text-gray-700">حدة الصوت (Tone)</label>
+                                  <span className="text-xs font-bold text-sky-600 bg-sky-100 px-2 py-0.5 rounded">{pitch}</span>
+                              </div>
+                              <input 
+                                type="range" 
+                                min="0.5" 
+                                max="1.5" 
+                                step="0.1" 
+                                value={pitch} 
+                                onChange={(e) => setPitch(parseFloat(e.target.value))}
+                                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-sky-500"
+                              />
+                              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                                  <span>عميق</span>
+                                  <span>طبيعي</span>
+                                  <span>حاد</span>
+                              </div>
+                          </div>
                           
-                          <div className="flex justify-end">
+                          <div className="flex justify-between items-center pt-2">
+                              <button 
+                                type="button"
+                                onClick={handleReset}
+                                className="text-xs text-gray-500 underline hover:text-gray-700"
+                              >
+                                  استعادة الافتراضي
+                              </button>
+
                               <button 
                                 type="button" 
                                 onClick={handleTest}
                                 disabled={isPlaying}
-                                className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-sky-700 bg-sky-100 hover:bg-sky-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500"
+                                className="inline-flex items-center px-4 py-2 border border-sky-300 text-sm font-medium rounded-full text-sky-700 bg-sky-50 hover:bg-sky-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 transition-colors"
                               >
-                                {isPlaying ? 'جاري التحدث...' : '🔊 تجربة الصوت'}
+                                {isPlaying ? (
+                                    <span className="flex items-center gap-2">
+                                        <span className="w-2 h-2 bg-sky-600 rounded-full animate-bounce"></span>
+                                        جاري التحدث...
+                                    </span>
+                                ) : (
+                                    <>🔊 تجربة الإعدادات</>
+                                )}
                               </button>
                           </div>
                       </div>
@@ -114,13 +190,13 @@ const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose
               </div>
             </div>
           </div>
-          <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-            <Button onClick={handleSave} className="w-full sm:w-auto sm:mr-3">
-              حفظ الإعدادات
+          <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse gap-2">
+            <Button onClick={handleSave} className="w-full sm:w-auto">
+              حفظ
             </Button>
             <button
               type="button"
-              className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 sm:mt-0 sm:w-auto"
+              className="mt-3 w-full inline-flex justify-center rounded-full border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 sm:mt-0 sm:w-auto sm:text-sm"
               onClick={onClose}
             >
               إلغاء
